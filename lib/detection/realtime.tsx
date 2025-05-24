@@ -22,6 +22,7 @@ export default class Realtime {
   private state: "ready" | "ball_found" | "ball_lost" = "ready";
   private ballPositions: Ball[] = [];
   private physics = new Physics();
+  private _onBallHit: () => void = () => {};
 
   ingestFrame(src: any, frameNumber: number) {
     const cv = window.cv;
@@ -68,9 +69,13 @@ export default class Realtime {
     console.log(this.state);
   }
 
+  set onBallHit(f: () => void) {
+    this._onBallHit = f;
+  }
+
   private stateTransition(newState: "ready" | "ball_found" | "ball_lost") {
     if (newState === "ball_lost" && this.state === "ball_found") {
-      console.log("Ball is hit");
+      this._onBallHit();
     }
     this.state = newState;
   }

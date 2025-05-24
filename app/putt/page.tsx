@@ -21,20 +21,40 @@ export default function Putt() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const realtime = useRef<Realtime | null>(null);
   const camera = useRef<Camera | null>(null);
+  const [data, setData] = useState<any>({});
 
   async function startCamera() {
     realtime.current = new Realtime();
     camera.current = new Camera(videoRef.current!, canvasRef.current!, (src: any, frameNumber: number) => {
       realtime.current!.ingestFrame(src, frameNumber);
+      //setData({
+      //  ...data,
+      //  estimatedMillimetersPerPixel: realtime.current!.estimatedMillimetersPerPixel,
+      //});
     });
+    realtime.current.onBallHit = () => {
+      //camera.current?.stop();
+      console.log("BALL HIT");
+      if (camera.current?.latestChunk) {
+        console.log("Set recording to analyze");
+        setData({
+          ...data,
+          recordingToAnalyze: camera.current?.latestChunk,
+          ballHit: true,
+        });
+      }
+      stopCamera();
+    }
+
     camera.current.start();
     setIsStreaming(true);
   }
 
   function stopCamera() {
-    //cameraRef.current?.stop();
+    camera.current?.stop();
     setIsStreaming(false);
   }
+  console.log(data);
 
   useEffect(() => {
     const script = document.createElement('script');
@@ -98,8 +118,15 @@ export default function Putt() {
             height="480"
           />
         </div>
+        <p>Estimated Millimeters Per Pixel: {data.estimatedMillimetersPerPixel}</p>
+        <p>Analyzing: {data.ballHit ? "true" : "false"}</p>
 
         <p className="text-gray-600">{status}</p>
+        {data.recordingToAnalyze && (
+          <div className="flex bg-gray-200 flex-col items-center justify-center mt-4">
+            <video width="640" height="480" src={URL.createObjectURL(data.recordingToAnalyze)} autoPlay muted loop></video>
+          </div>
+        )}
       </div>
 
     </div>

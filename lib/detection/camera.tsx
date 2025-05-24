@@ -1,3 +1,8 @@
+const CHUNK_DURATION_MS = 250;
+const MAX_BUFFER_SIZE = 20;
+
+// Total time of video recording buffer is CHUNK_DURATION_MS * MAX_BUFFER_SIZE
+
 export default class Camera {
   private streaming: boolean;
   private video: HTMLVideoElement;
@@ -9,6 +14,8 @@ export default class Camera {
   public estimatedFps: number;
   private lastFrameTime: number;
   private alpha: number = 0.1; // smoothing factor
+  private circularBuffer: Blob[];
+  private mediaRecorder: MediaRecorder | null = null;
 
   constructor(video: HTMLVideoElement, canvas: HTMLCanvasElement, onFrame: (frame: any, frameNumber: number) => void) {
     this.frameNumber = 0;
@@ -17,7 +24,9 @@ export default class Camera {
     this.canvas = canvas;
     this.onFrame = onFrame;
     this.estimatedFps = 0;
+    // circular video recording buffer
     this.lastFrameTime = 0;
+    this.circularBuffer = [];
   }
 
   async stop() {
@@ -62,9 +71,9 @@ export default class Camera {
   async start() {
     const thiz = this;
     return new Promise((resolve, reject) => {
-      navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-        .then(function (s: MediaStream) {
-          thiz.stream = s;
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+        .then(function (stream: MediaStream) {
+          thiz.stream = stream;
           thiz.video.srcObject = thiz.stream;
           thiz.video.play();
 
@@ -75,10 +84,26 @@ export default class Camera {
             resolve(void 0);
           };
           thiz.streaming = true;
+
+          // Start circular buffer recording
+          thiz.mediaRecorder = new MediaRecorder(stream);
+          thiz.mediaRecorder.start(CHUNK_DURATION_MS);
+          thiz.mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+              thiz.circularBuffer.push(e.data);
+              if (thiz.circularBuffer.length > MAX_BUFFER_SIZE) {
+                thiz.circularBuffer.shift(); // remove oldest chunk
+              }
+            }
+          };
         }.bind(this))
         .catch(function (err) {
           reject(err);
         });
     });
+  }
+
+  get latestChunk() {
+    return this.circularBuffer[this.circularBuffer.length - 1];
   }
 }

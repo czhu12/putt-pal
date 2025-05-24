@@ -4,17 +4,19 @@ import * as ort from 'onnxruntime-web';
 const MODEL_PATH: string = "/saved_models/best.onnx";
 const CLASS_ID_GOLF_BALL = 0;
 const INPUT_SIZE = 640;
-function preprocess(imageData: ImageData) {
-  const { data } = imageData;
-  const floatData = new Float32Array(INPUT_SIZE * INPUT_SIZE * 3);
 
-  for (let i = 0; i < INPUT_SIZE * INPUT_SIZE; i++) {
-    floatData[i] = data[i * 4 + 0] / 255;                 // R
-    floatData[i + INPUT_SIZE * INPUT_SIZE] = data[i * 4 + 1] / 255; // G
-    floatData[i + 2 * INPUT_SIZE * INPUT_SIZE] = data[i * 4 + 2] / 255; // B
+function preprocessImageDataToTensor(imageData: ImageData): Float32Array {
+  const { data, width, height } = imageData;
+  const float32 = new Float32Array(3 * width * height);
+
+  for (let i = 0; i < width * height; i++) {
+    const base = i * 4;
+    float32[i] = data[base] / 255.0;                      // R
+    float32[i + width * height] = data[base + 1] / 255.0; // G
+    float32[i + 2 * width * height] = data[base + 2] / 255.0; // B
   }
 
-  return new ort.Tensor("float32", floatData, [1, 3, INPUT_SIZE, INPUT_SIZE]);
+  return float32;
 }
 
 class Analyze {
@@ -31,6 +33,30 @@ class Analyze {
     });
   }
 
-  async analyze(image: ImageData) {
+  async processBlobWithYOLO(
+    blob: Blob,
+    session: ort.InferenceSession,
+    inputSize: number = 640
+  ): Promise<ort.InferenceSession.OnnxValueMapType> {
+    const imgBitmap: ImageBitmap = await createImageBitmap(blob);
+  
+    const canvas = document.createElement('canvas');
+    canvas.width = inputSize;
+    canvas.height = inputSize;
+  
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not get canvas context');
+  
+    ctx.drawImage(imgBitmap, 0, 0, inputSize, inputSize);
+    const imageData: ImageData = ctx.getImageData(0, 0, inputSize, inputSize);
+  
+    const tensorData: Float32Array = preprocessImageDataToTensor(imageData);
+  
+    const feeds: Record<string, ort.Tensor> = {
+      [session.inputNames[0]]: new ort.Tensor('float32', tensorData, [1, 3, inputSize, inputSize])
+    };
+  
+    const output = await session.run(feeds);
+    return output;
   }
-}
+  }
