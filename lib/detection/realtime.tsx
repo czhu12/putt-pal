@@ -1,6 +1,6 @@
 import Physics, { Circle } from "./physics";
 
-const NUM_FRAMES_WITHOUT_BALL = 20;
+const NUM_FRAMES_WITHOUT_BALL = 60;
 const NUM_FRAMES_WITH_BALL = 3;
 
 interface Ball extends Circle {
@@ -34,9 +34,9 @@ export default class Realtime {
       src,
       circles,
       cv.HOUGH_GRADIENT,
-      1,
+      0.5,
       250,
-      200,
+      300,
       40,
       0,
       0
@@ -66,7 +66,6 @@ export default class Realtime {
         this.stateTransition("ball_lost");
       }
     }
-    console.log(this.state);
   }
 
   set onBallHit(f: () => void) {

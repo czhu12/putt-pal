@@ -1,7 +1,4 @@
-const CHUNK_DURATION_MS = 250;
-const MAX_BUFFER_SIZE = 20;
-
-// Total time of video recording buffer is CHUNK_DURATION_MS * MAX_BUFFER_SIZE
+const CHUNK_DURATION_MS = 2500;
 
 export default class Camera {
   private streaming: boolean;
@@ -14,7 +11,7 @@ export default class Camera {
   public estimatedFps: number;
   private lastFrameTime: number;
   private alpha: number = 0.1; // smoothing factor
-  private circularBuffer: Blob[];
+  private recordingBuffer: Blob[];
   private mediaRecorder: MediaRecorder | null = null;
 
   constructor(video: HTMLVideoElement, canvas: HTMLCanvasElement, onFrame: (frame: any, frameNumber: number) => void) {
@@ -24,9 +21,8 @@ export default class Camera {
     this.canvas = canvas;
     this.onFrame = onFrame;
     this.estimatedFps = 0;
-    // circular video recording buffer
     this.lastFrameTime = 0;
-    this.circularBuffer = [];
+    this.recordingBuffer = [];
   }
 
   async stop() {
@@ -90,10 +86,7 @@ export default class Camera {
           thiz.mediaRecorder.start(CHUNK_DURATION_MS);
           thiz.mediaRecorder.ondataavailable = (e) => {
             if (e.data.size > 0) {
-              thiz.circularBuffer.push(e.data);
-              if (thiz.circularBuffer.length > MAX_BUFFER_SIZE) {
-                thiz.circularBuffer.shift(); // remove oldest chunk
-              }
+              thiz.recordingBuffer.push(e.data);
             }
           };
         }.bind(this))
@@ -103,7 +96,15 @@ export default class Camera {
     });
   }
 
+  returnRecording(): Blob {
+    this.mediaRecorder?.stop();
+    return new Blob(this.recordingBuffer, { type: 'video/webm' });
+  }
+
+  get recording() {
+    return new Blob(this.recordingBuffer, { type: 'video/webm' });
+  }
   get latestChunk() {
-    return this.circularBuffer[this.circularBuffer.length - 1];
+    return this.recordingBuffer[this.recordingBuffer.length - 1];
   }
 }
