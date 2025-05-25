@@ -15,6 +15,7 @@ function parseCircles(circles: any): Circle[] {
     let radius = circles.data32F[i * 3 + 2];
     parsedCircles.push({ x, y, radius });
   }
+
   return parsedCircles;
 }
 

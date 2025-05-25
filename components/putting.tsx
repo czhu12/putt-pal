@@ -6,13 +6,17 @@ import Realtime from "@/lib/detection/realtime";
 import Analyze from "@/lib/detection/analyze";
 import Physics from "@/lib/detection/physics";
 
+interface Results {
+  loading: boolean,
+  distance: number,
+  speed: number,
+  smashFactor: number,
+}
+
 const physics = new Physics();
-//const realtime = new Realtime();
-//const camera = new Camera();
 export default function Putting() {
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [status, setStatus] = useState('OpenCV.js is loading...');
-  const [analyzerLoaded, setAnalyzerLoaded] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const realtime = useRef<Realtime | null>(null);
@@ -22,12 +26,7 @@ export default function Putting() {
 
   const [data, setData] = useState<any>({});
   const [recording, setRecording] = useState<Blob | undefined>(undefined);
-  const [results, setResults] = useState<{
-    loading: boolean,
-    distance: number,
-    speed: number,
-    smashFactor: number,
-  }>({
+  const [results, setResults] = useState<Results>({
     loading: false,
     distance: 0,
     speed: 0,
@@ -52,12 +51,10 @@ export default function Putting() {
     }
 
     camera.current.start();
-    setIsStreaming(true);
   }
 
   function stopCamera() {
     camera.current?.stop();
-    setIsStreaming(false);
   }
 
   function runTimer() {
@@ -70,30 +67,39 @@ export default function Putting() {
   async function loadAnalyzer() {
     analyze.current = new Analyze();
     await analyze.current.load();
-    setAnalyzerLoaded(true);
+  }
+
+  async function loadOpenCv() {
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://docs.opencv.org/4.7.0/opencv.js';
+      script.async = true;
+      script.onload = () => {
+        if (window.cv) {
+          window.cv['onRuntimeInitialized'] = () => {
+            resolve(true);
+          };
+        } else {
+          reject(new Error('Failed to load OpenCV.js'));
+        }
+      };
+      script.onerror = () => {
+        reject(new Error('Failed to load OpenCV.js'));
+      };
+      document.body.appendChild(script);
+    })
+  }
+
+  async function initializeModels() {
+    await Promise.all([loadAnalyzer(), loadOpenCv()]);
+    setIsReady(true);
+    startCamera();
   }
 
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
-    loadAnalyzer();
-
-    const script = document.createElement('script');
-    script.src = 'https://docs.opencv.org/4.7.0/opencv.js';
-    script.async = true;
-    script.onload = () => {
-      if (window.cv) {
-        window.cv['onRuntimeInitialized'] = () => {
-          setStatus('OpenCV.js is ready!');
-        };
-      } else {
-        setStatus('Failed to load OpenCV.js');
-      }
-    };
-    script.onerror = () => {
-      setStatus('Error loading OpenCV.js');
-    };
-    document.body.appendChild(script);
+    initializeModels();
 
     const interval = setInterval(() => {
       runTimer();
@@ -101,7 +107,6 @@ export default function Putting() {
 
     return () => {
       clearInterval(interval);
-      document.body.removeChild(script);
     };
   }, []);
 
@@ -111,16 +116,15 @@ export default function Putting() {
     const result = physics.estimate(predictions!);
     if (result) {
       setResults({
+        ...results,
         loading: false,
-        distance: result.distance,
-        speed: result.speed,
-        smashFactor: result.smashFactor,
       });
     }
   }
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
+      <p className="text-gray-600">{isReady ? "ready" : "loading..."}</p>
       <div className="grid grid-cols-3 gap-4 max-w-[640px] w-full text-center p-4">
         <div className="border-r-1 border-gray-300">
           <p>
@@ -163,30 +167,13 @@ export default function Putting() {
           const blob = await response.blob();
           analyzeRecording(blob);
         }}
-        disabled={!analyzerLoaded}>
+        disabled={!isReady}>
           Test Analyze
         </button>
       <div>
 
       </div>
       <div className="space-y-4">
-        <div className="flex gap-4">
-          <button 
-            onClick={startCamera}
-            disabled={isStreaming}
-            className="bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-bold py-2 px-4 rounded"
-          >
-            Start Camera
-          </button>
-          <button 
-            onClick={stopCamera}
-            disabled={!isStreaming}
-            className="bg-red-500 hover:bg-red-600 disabled:bg-gray-400 text-white font-bold py-2 px-4 rounded"
-          >
-            Stop Camera
-          </button>
-        </div>
-
         <div className="relative top-0 left-0">
           <video 
             className="w-full h-full object-cover bg-black "
@@ -218,7 +205,6 @@ export default function Putting() {
         </div>
         <p>Analyzing: {!!recording ? "true" : "false"}</p>
 
-        <p className="text-gray-600">{status}</p>
         {recording && (
           <div className="flex bg-gray-200 flex-col items-center justify-center mt-4">
             <video width="640" height="480" src={URL.createObjectURL(recording)} autoPlay muted loop></video>
