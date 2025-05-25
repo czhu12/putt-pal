@@ -21,8 +21,12 @@ function parseCircles(circles: any): Circle[] {
 export default class Realtime {
   private state: "ready" | "ball_found" | "ball_lost" = "ready";
   private ballPositions: Ball[] = [];
-  private physics = new Physics();
   private _onBallHit: () => void = () => {};
+  private physics: Physics;
+
+  constructor(physics: Physics) {
+    this.physics = physics;
+  }
 
   ingestFrame(src: any, frameNumber: number) {
     const cv = window.cv;
@@ -77,9 +81,5 @@ export default class Realtime {
       this._onBallHit();
     }
     this.state = newState;
-  }
-
-  get estimatedMillimetersPerPixel() {
-    return this.physics.estimatedMillimetersPerPixel;
   }
 }

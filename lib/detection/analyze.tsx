@@ -9,6 +9,16 @@ const INFERENCE_BATCH_SIZE = 10;
 const INPUT_SIZE = 640;
 const FRAME_RATE = 30;
 
+export interface Prediction {
+  frameNumber: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  conf: number;
+  classId: number;
+}
+
 export default class Analyze {
   private session: ort.InferenceSession | null = null;
   private ffmpeg: FFmpeg;
@@ -31,7 +41,7 @@ export default class Analyze {
     });
   }
 
-  async processBlobWithYOLO(blob: Blob): Promise<any> {
+  async predict(blob: Blob): Promise<Prediction[]> {
     // Write blob to ffmpeg virtual filesystem
     await this.ffmpeg.writeFile('input.webm', await fetchFile(blob));
 
@@ -55,8 +65,12 @@ export default class Analyze {
     const files = await this.ffmpeg.listDir('/');
     const frameFiles = files.filter((f) => f.name.startsWith('frame_') && f.name.endsWith('.jpg'));
 
+    const predictions: Prediction[] = [];
+
     // Process each frame
-    for (const frameFile of frameFiles) {
+    console.log("Found", frameFiles.length, "frames");
+    for (let f = 0; f < frameFiles.length; f++) {
+      const frameFile = frameFiles[f];
       const frameData = await this.ffmpeg.readFile(frameFile.name);
       const blob = new Blob([frameData], { type: 'image/jpeg' });
       const bitmap = await createImageBitmap(blob);
@@ -79,26 +93,26 @@ export default class Analyze {
       const data = output[Object.keys(output)[0]].data;
       for (let i = 0; i < 300; i++) {
         const base = i * 6;
-        const x1 = data[base];
-        const y1 = data[base + 1];
-        const x2 = data[base + 2];
-        const y2 = data[base + 3];
-        const conf = data[base + 4] as number;
-        const classId = data[base + 5];
-      
+        const prediction: Prediction = {
+          frameNumber: f,
+          x1: data[base] as number / INPUT_SIZE,
+          y1: data[base + 1] as number / INPUT_SIZE,
+          x2: data[base + 2] as number / INPUT_SIZE,
+          y2: data[base + 3] as number / INPUT_SIZE,
+          conf: data[base + 4] as number,
+          classId: data[base + 5] as number
+        };
         // Stop when confidence drops below threshold
-        if (conf < 0.01) break;
-        if (classId !== CLASS_ID_GOLF_BALL) continue;
-        const prediction = { x1, y1, x2, y2, conf, classId };
-      
-        return {blob, prediction}
+        if (prediction.conf < 0.01) break;
+        if (prediction.classId !== CLASS_ID_GOLF_BALL) continue;
+        predictions.push(prediction);
       }
     }
-
     // Cleanup
     frameFiles.forEach((f) => this.ffmpeg.deleteFile(f.name));
     this.ffmpeg.deleteFile('input.webm');
     this.ffmpeg.deleteFile('trimmed.webm');
+    return predictions;
   }
 
   private preprocessImageDataToTensor(imageData: ImageData): Float32Array {

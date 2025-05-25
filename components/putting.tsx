@@ -4,12 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import Camera from "@/lib/detection/camera";
 import Realtime from "@/lib/detection/realtime";
 import Analyze from "@/lib/detection/analyze";
+import Physics from "@/lib/detection/physics";
 
+const physics = new Physics();
 //const realtime = new Realtime();
 //const camera = new Camera();
 export default function Putting() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [status, setStatus] = useState('OpenCV.js is loading...');
+  const [analyzerLoaded, setAnalyzerLoaded] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const realtime = useRef<Realtime | null>(null);
@@ -19,11 +22,20 @@ export default function Putting() {
 
   const [data, setData] = useState<any>({});
   const [recording, setRecording] = useState<Blob | undefined>(undefined);
-
-  const predictionCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [results, setResults] = useState<{
+    loading: boolean,
+    distance: number,
+    speed: number,
+    smashFactor: number,
+  }>({
+    loading: false,
+    distance: 0,
+    speed: 0,
+    smashFactor: 1.0,
+  });
 
   async function startCamera() {
-    realtime.current = new Realtime();
+    realtime.current = new Realtime(physics);
     camera.current = new Camera(videoRef.current!, canvasRef.current!, (src: any, frameNumber: number) => {
       realtime.current!.ingestFrame(src, frameNumber);
     });
@@ -32,8 +44,8 @@ export default function Putting() {
       setTimeout(() => {
         const recording: Blob | undefined = camera.current?.returnRecording();
         if (recording) {
+          analyzeRecording(recording);
           setRecording(recording);
-          //analyze.current?.processBlobWithYOLO(recording!);
           stopCamera();
         }
       }, 2000)
@@ -51,14 +63,14 @@ export default function Putting() {
   function runTimer() {
     setData({
       ...data,
-      estimatedMillimetersPerPixel: realtime.current?.estimatedMillimetersPerPixel,
+      worldSize: physics.worldSize(),
     });
   }
 
   async function loadAnalyzer() {
     analyze.current = new Analyze();
     await analyze.current.load();
-    setStatus('Analyzer loaded!');
+    setAnalyzerLoaded(true);
   }
 
   useEffect(() => {
@@ -93,44 +105,67 @@ export default function Putting() {
     };
   }, []);
 
+  async function analyzeRecording(recording: Blob) {
+    physics.setVideoSize(videoRef.current!.width, videoRef.current!.height);
+    const predictions = await analyze.current?.predict(recording);
+    const result = physics.estimate(predictions!);
+    if (result) {
+      setResults({
+        loading: false,
+        distance: result.distance,
+        speed: result.speed,
+        smashFactor: result.smashFactor,
+      });
+    }
+  }
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
-      <h1 className="text-2xl font-bold mb-4">Putt Pal Camera</h1>
+    <div className="min-h-screen flex flex-col items-center justify-center p-4">
+      <div className="grid grid-cols-3 gap-4 max-w-[640px] w-full text-center p-4">
+        <div className="border-r-1 border-gray-300">
+          <p>
+            <span className="text-4xl font-bold">
+              {results.loading ? "..." : results.distance.toFixed(2)}
+            </span>
+            <span className="text-sm ml-2">meters</span>
+          </p>
+          <div>Distance</div>
+        </div>
+        <div className="border-r-1 border-gray-300">
+          <p>
+            <span className="text-4xl font-bold">
+              {results.loading ? "..." : results.speed.toFixed(2)}
+            </span>
+            <span className="text-sm ml-2">m/s</span>
+          </p>
+          <div>Speed</div>
+        </div>
+        <div>
+          <p>
+            <span className="text-4xl font-bold">
+              {results.loading ? "..." : results.smashFactor.toFixed(2)}
+            </span>
+          </p>
+          <div>Smash Factor</div>
+        </div>
+      </div>
+
       <button
         className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold py-2 px-4 rounded"
         onClick={async () => {
+          setResults({
+            loading: true,
+            distance: 0,
+            speed: 0,
+            smashFactor: 1.0,
+          });
           const response = await fetch('/examples/putt.webm');
           const blob = await response.blob();
-          const {blob: imageBlob, prediction} = await analyze.current?.processBlobWithYOLO(blob);
-          const ctx = predictionCanvasRef.current!.getContext('2d');
-          if (ctx) {
-            const img = new Image();
-            img.src = URL.createObjectURL(imageBlob);
-            img.onload = () => {
-              predictionCanvasRef.current!.width = img.width;
-              predictionCanvasRef.current!.height = img.height;
-              ctx.drawImage(img, 0, 0, img.width, img.height);
-              if (prediction) {
-                ctx.strokeStyle = '#00ff00';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(
-                  prediction.x1 * img.width / 640,
-                  prediction.y1 * img.height / 640,
-                  (prediction.x2 - prediction.x1) * img.width / 640,
-                  (prediction.y2 - prediction.y1) * img.height / 640
-                );
-                ctx.fillStyle = '#00ff00';
-                ctx.font = '16px Arial';
-                ctx.fillText(`${prediction.classId} (${(prediction.conf * 100).toFixed(1)}%)`, prediction.x1 * img.width / 640, prediction.y1 * img.height / 640 - 5);
-              }
-              URL.revokeObjectURL(img.src);
-            };
-            
-          }
-        }}>
+          analyzeRecording(blob);
+        }}
+        disabled={!analyzerLoaded}>
           Test Analyze
         </button>
-        <canvas ref={predictionCanvasRef}></canvas>
       <div>
 
       </div>
@@ -176,7 +211,7 @@ export default function Putting() {
                 Estimated Millimeters Per Pixel: {data.estimatedMillimetersPerPixel.toFixed(4)}
               </p>
               <p>
-                Estimated Frame Size (cm): {(data.estimatedMillimetersPerPixel * 640 / 10).toFixed(2)} x {(data.estimatedMillimetersPerPixel * 480 / 10).toFixed(2)}
+                Estimated Frame Size (cm): {(data.worldSize.xInMillimeters / 10).toFixed(2)} x {(data.worldSize.yInMillimeters / 10).toFixed(2)}
               </p>
             </code>
           )}
@@ -190,7 +225,6 @@ export default function Putting() {
           </div>
         )}
       </div>
-
     </div>
   );
 }
