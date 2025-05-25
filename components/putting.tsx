@@ -5,25 +5,22 @@ import Camera from "@/lib/detection/camera";
 import Realtime from "@/lib/detection/realtime";
 import Analyze from "@/lib/detection/analyze";
 
-declare global {
-  interface Window {
-    cv: any;
-  }
-}
-
 //const realtime = new Realtime();
 //const camera = new Camera();
-export default function Putt() {
+export default function Putting() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [status, setStatus] = useState('OpenCV.js is loading...');
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const realtime = useRef<Realtime | null>(null);
-  //const analyze = useRef<Analyze | null>(null);
+  const analyze = useRef<Analyze | null>(null);
   const camera = useRef<Camera | null>(null);
+  const initialized = useRef(false);
 
   const [data, setData] = useState<any>({});
   const [recording, setRecording] = useState<Blob | undefined>(undefined);
+
+  const predictionCanvasRef = useRef<HTMLCanvasElement>(null);
 
   async function startCamera() {
     realtime.current = new Realtime();
@@ -58,9 +55,16 @@ export default function Putt() {
     });
   }
 
+  async function loadAnalyzer() {
+    analyze.current = new Analyze();
+    await analyze.current.load();
+    setStatus('Analyzer loaded!');
+  }
+
   useEffect(() => {
-    //analyze.current = new Analyze();
-    //analyze.current.load();
+    if (initialized.current) return;
+    initialized.current = true;
+    loadAnalyzer();
 
     const script = document.createElement('script');
     script.src = 'https://docs.opencv.org/4.7.0/opencv.js';
@@ -92,7 +96,41 @@ export default function Putt() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
       <h1 className="text-2xl font-bold mb-4">Putt Pal Camera</h1>
-      
+      <button
+        className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold py-2 px-4 rounded"
+        onClick={async () => {
+          const response = await fetch('/examples/putt.webm');
+          const blob = await response.blob();
+          const {blob: imageBlob, prediction} = await analyze.current?.processBlobWithYOLO(blob);
+          const ctx = predictionCanvasRef.current!.getContext('2d');
+          if (ctx) {
+            const img = new Image();
+            img.src = URL.createObjectURL(imageBlob);
+            img.onload = () => {
+              predictionCanvasRef.current!.width = img.width;
+              predictionCanvasRef.current!.height = img.height;
+              ctx.drawImage(img, 0, 0, img.width, img.height);
+              if (prediction) {
+                ctx.strokeStyle = '#00ff00';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(
+                  prediction.x1 * img.width / 640,
+                  prediction.y1 * img.height / 640,
+                  (prediction.x2 - prediction.x1) * img.width / 640,
+                  (prediction.y2 - prediction.y1) * img.height / 640
+                );
+                ctx.fillStyle = '#00ff00';
+                ctx.font = '16px Arial';
+                ctx.fillText(`${prediction.classId} (${(prediction.conf * 100).toFixed(1)}%)`, prediction.x1 * img.width / 640, prediction.y1 * img.height / 640 - 5);
+              }
+              URL.revokeObjectURL(img.src);
+            };
+            
+          }
+        }}>
+          Test Analyze
+        </button>
+        <canvas ref={predictionCanvasRef}></canvas>
       <div>
 
       </div>

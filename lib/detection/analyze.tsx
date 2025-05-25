@@ -5,6 +5,7 @@ import { fetchFile, toBlobURL } from '@ffmpeg/util';
 // Analyze the image to determine if the ball is in the frame
 const MODEL_PATH: string = "/models/best.onnx";
 const CLASS_ID_GOLF_BALL = 0;
+const INFERENCE_BATCH_SIZE = 10;
 const INPUT_SIZE = 640;
 const FRAME_RATE = 30;
 
@@ -30,7 +31,7 @@ export default class Analyze {
     });
   }
 
-  async processBlobWithYOLO(blob: Blob) {
+  async processBlobWithYOLO(blob: Blob): Promise<any> {
     // Write blob to ffmpeg virtual filesystem
     await this.ffmpeg.writeFile('input.webm', await fetchFile(blob));
 
@@ -75,14 +76,29 @@ export default class Analyze {
       };
 
       const output = await this.session!.run(feeds);
-      // TODO: Handle output results
-      console.log(output);
+      const data = output[Object.keys(output)[0]].data;
+      for (let i = 0; i < 300; i++) {
+        const base = i * 6;
+        const x1 = data[base];
+        const y1 = data[base + 1];
+        const x2 = data[base + 2];
+        const y2 = data[base + 3];
+        const conf = data[base + 4] as number;
+        const classId = data[base + 5];
+      
+        // Stop when confidence drops below threshold
+        if (conf < 0.01) break;
+        if (classId !== CLASS_ID_GOLF_BALL) continue;
+        const prediction = { x1, y1, x2, y2, conf, classId };
+      
+        return {blob, prediction}
+      }
     }
 
     // Cleanup
-    //frameFiles.forEach((f) => this.ffmpeg.unlink(f.name));
-    //this.ffmpeg.unlink('input.webm');
-    //this.ffmpeg.unlink('trimmed.webm');
+    frameFiles.forEach((f) => this.ffmpeg.deleteFile(f.name));
+    this.ffmpeg.deleteFile('input.webm');
+    this.ffmpeg.deleteFile('trimmed.webm');
   }
 
   private preprocessImageDataToTensor(imageData: ImageData): Float32Array {
