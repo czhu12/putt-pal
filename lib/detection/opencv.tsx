@@ -1,4 +1,4 @@
-export default function loadOpenCv() {
+export default async function loadOpenCv() {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
     script.src = 'https://docs.opencv.org/4.7.0/opencv.js';
@@ -6,15 +6,15 @@ export default function loadOpenCv() {
     script.onload = () => {
       if (window.cv) {
         window.cv['onRuntimeInitialized'] = () => {
-          resolve(window.cv);
+          resolve(true);
         };
       } else {
-        reject('Failed to load OpenCV.js');
+        reject(new Error('Failed to load OpenCV.js'));
       }
     };
     script.onerror = () => {
-      reject('Error loading OpenCV.js');
+      reject(new Error('Failed to load OpenCV.js'));
     };
     document.body.appendChild(script);
-  });
+  })
 }
