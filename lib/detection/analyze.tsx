@@ -1,6 +1,7 @@
 import * as ort from 'onnxruntime-web';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { log } from './logging';
 
 // Analyze the image to determine if the ball is in the frame
 const MODEL_PATH: string = "/models/best.onnx";
@@ -26,7 +27,7 @@ export default class Analyze {
   constructor() {
     this.ffmpeg = new FFmpeg();
     this.ffmpeg.on("log", ({ message }) => {
-      console.log(message);
+      log(message);
     })
   }
 
@@ -68,7 +69,7 @@ export default class Analyze {
     const predictions: Prediction[] = [];
 
     // Process each frame
-    console.log("Found", frameFiles.length, "frames");
+    log(`Extracted ${frameFiles.length} frames`);
     for (let f = 0; f < frameFiles.length; f++) {
       const frameFile = frameFiles[f];
       const frameData = await this.ffmpeg.readFile(frameFile.name);
@@ -106,6 +107,9 @@ export default class Analyze {
         if (prediction.conf < 0.01) break;
         if (prediction.classId !== CLASS_ID_GOLF_BALL) continue;
         predictions.push(prediction);
+      }
+      if (f % 10 === 0) {
+        log(`Processed ${f} / ${frameFiles.length} frames`);
       }
     }
     // Cleanup

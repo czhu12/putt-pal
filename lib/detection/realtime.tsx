@@ -24,9 +24,14 @@ export default class Realtime {
   private ballPositions: Ball[] = [];
   private _onBallHit: () => void = () => {};
   private physics: Physics;
+  private debug: boolean = false;
 
   constructor(physics: Physics) {
     this.physics = physics;
+  }
+
+  setDebug(debug: boolean) {
+    this.debug = debug;
   }
 
   ingestFrame(src: any, frameNumber: number) {
@@ -48,12 +53,14 @@ export default class Realtime {
     );
     const parsedCircles = parseCircles(circles);
     
-    // Draw circles on the image
-    for (const circle of parsedCircles) {
-      cv.circle(src, new cv.Point(circle.x, circle.y), circle.radius, new cv.Scalar(0, 255, 0, 255), 2);
+    if (this.debug) {
+      // Draw circles on the image
+      for (const circle of parsedCircles) {
+        cv.circle(src, new cv.Point(circle.x, circle.y), circle.radius, new cv.Scalar(0, 255, 0, 255), 2);
+      }
+      
+      cv.imshow('canvasOutput', src);
     }
-    
-    cv.imshow('canvasOutput', src);
     src.delete();
     dst.delete();
     circles.delete();

@@ -4,7 +4,6 @@ export default class Camera {
   private streaming: boolean;
   private video: HTMLVideoElement;
   private stream: MediaStream | null = null;
-  private canvas: HTMLCanvasElement;
   private cap: any; //cv.VideoCapture;
   private onFrame: (frame: any, frameNumber: number) => void;
   private frameNumber: number;
@@ -13,16 +12,20 @@ export default class Camera {
   private alpha: number = 0.1; // smoothing factor
   private recordingBuffer: Blob[];
   private mediaRecorder: MediaRecorder | null = null;
+  private debug: boolean = false;
 
-  constructor(video: HTMLVideoElement, canvas: HTMLCanvasElement, onFrame: (frame: any, frameNumber: number) => void) {
+  constructor(video: HTMLVideoElement, onFrame: (frame: any, frameNumber: number) => void) {
     this.frameNumber = 0;
     this.streaming = false;
     this.video = video;
-    this.canvas = canvas;
     this.onFrame = onFrame;
     this.estimatedFps = 0;
     this.lastFrameTime = 0;
     this.recordingBuffer = [];
+  }
+
+  setDebug(debug: boolean) {
+    this.debug = debug;
   }
 
   async stop() {
@@ -70,12 +73,20 @@ export default class Camera {
       navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
         .then(function (stream: MediaStream) {
           thiz.stream = stream;
+          const videoTrack = stream.getVideoTracks()[0];
+          const settings = videoTrack.getSettings();
+
           thiz.video.srcObject = thiz.stream;
           thiz.video.play();
+          console.log("Setting video width and height", settings.width, settings.height);
+          thiz.video.width = settings.width!;
+          thiz.video.height = settings.height!;
 
           thiz.video.onloadedmetadata = function () {
-            thiz.canvas.width = thiz.video.videoWidth;
-            thiz.canvas.height = thiz.video.videoHeight;
+            if (thiz.debug) {
+              document.getElementById('canvasOutput')!.setAttribute('width', thiz.video.videoWidth.toString());
+              document.getElementById('canvasOutput')!.setAttribute('height', thiz.video.videoHeight.toString());
+            }
             thiz.startVideoCapture();
             resolve(void 0);
           };
