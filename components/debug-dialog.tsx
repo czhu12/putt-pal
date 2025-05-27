@@ -6,9 +6,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { useState } from "react";
 
 
 export default function DebugDialog({ analyzeRecording, isReady }: { analyzeRecording: (blob: Blob) => void, isReady: boolean }) {
+  const [selectedUrl, setSelectedUrl] = useState<string | null>(null);
   return (
     <Dialog>
       <DialogTrigger>Open Debugger</DialogTrigger>
@@ -33,15 +35,24 @@ export default function DebugDialog({ analyzeRecording, isReady }: { analyzeReco
                   key={url}
                   className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold py-2 px-4 rounded"
                   onClick={async () => {
+                    setSelectedUrl(url);
                     const response = await fetch(url);
                     const blob = await response.blob();
                     analyzeRecording(blob);
                   }}
                   disabled={!isReady}>
-                  Analyze {url.split('/').pop()?.split('.').shift()}
+                  Analyze {url.split('/').pop()?.split('.').shift()} {selectedUrl === url && "🔴"}
                 </button>
               ))}
             </span>
+            {selectedUrl && (
+              <span className="flex flex-col items-center justify-center">
+                <video src={selectedUrl} autoPlay muted loop className="w-[200px]" />
+                <span className="text-sm text-gray-500">
+                  {selectedUrl.split('/').pop()?.split('.').shift()}
+                </span>
+              </span>
+            )}
           </DialogDescription>
         </DialogHeader>
       </DialogContent>
