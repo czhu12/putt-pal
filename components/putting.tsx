@@ -5,7 +5,6 @@ import { useSearchParams } from "next/navigation";
 import Camera from "@/lib/detection/camera";
 import Realtime from "@/lib/detection/realtime";
 import Analyze from "@/lib/detection/analyze";
-import Physics from "@/lib/detection/physics";
 import { loadOpenCv } from "@/lib/detection/opencv";
 import DebugDialog from "./debug-dialog";
 import StatsHeader from "./stats-header";
@@ -18,7 +17,6 @@ export interface Results {
   smashFactor: number,
 }
 
-const physics = new Physics();
 export default function Putting() {
   const searchParams = useSearchParams();
   const debug = searchParams.get('debug') === 'true';
@@ -39,7 +37,7 @@ export default function Putting() {
   });
 
   async function startCamera() {
-    realtime.current = new Realtime(physics);
+    realtime.current = new Realtime(3);
     camera.current = new Camera(
       videoRef.current!,
         (src: any, frameNumber: number) => {
@@ -47,6 +45,7 @@ export default function Putting() {
       });
     camera.current.setDebug(debug);
 
+    console.log("setting on bal hit")
     realtime.current.onBallHit = () => {
       log("BALL HIT");
       //setTimeout(() => {
@@ -91,17 +90,20 @@ export default function Putting() {
       speed: 0,
       smashFactor: 1.0,
     });
-    physics.setVideoSize(videoRef.current!.width, videoRef.current!.height);
     const output = await analyze.current?.predict(recording);
+    console.log(output);
 
-    debugger
-    const result = physics.estimate(output!.predictions, output!.worldSize);
-    if (result) {
+    setTimeout(() => {
+      // Wait 1 second then restart the timer
+      realtime.current?.setState("ready");
+    }, 1000);
+    //const result = physics.estimate(output!.predictions, output!.worldSize);
+    if (output) {
       setResults({
         loading: false,
-        distance: result.distance,
-        speed: result.speed,
-        smashFactor: result.smashFactor,
+        distance: output.estimate.distance,
+        speed: output.estimate.speed,
+        smashFactor: output.estimate.smashFactor,
       });
     }
   }

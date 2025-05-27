@@ -3,7 +3,6 @@ import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { log } from './logging';
 import Physics, { WorldSize } from './physics';
-import { houghCircles } from './opencv';
 
 // Analyze the image to determine if the ball is in the frame
 const MODEL_PATH: string = "/models/best.onnx";
@@ -13,7 +12,7 @@ const INFERENCE_BATCH_SIZE = 10;
 const INPUT_SIZE = 640;
 const FRAME_RATE = 30;
 
-export interface Prediction {
+export interface FramePrediction {
   frameNumber: number;
   x1: number;
   y1: number;
@@ -23,22 +22,28 @@ export interface Prediction {
   classId: number;
 }
 
-export interface Results {
-  predictions: Prediction[];
+export interface PhysicsEstimate {
+  distance: number;
+  speed: number;
+  smashFactor: number;
+  metersPerSecondPutter: number;
+}
+
+export interface Prediction {
+  predictions: FramePrediction[];
   worldSize: WorldSize;
+  estimate: PhysicsEstimate;
 }
 
 export default class Analyze {
   private session: ort.InferenceSession | null = null;
   private ffmpeg: FFmpeg;
-  private physics: Physics;
 
   constructor() {
     this.ffmpeg = new FFmpeg();
     this.ffmpeg.on("log", ({ message }) => {
       log(message);
     })
-    this.physics = new Physics();
   }
 
   async load() {
@@ -52,7 +57,7 @@ export default class Analyze {
     });
   }
 
-  async predict(blob: Blob): Promise<Results> {
+  async predict(blob: Blob): Promise<Prediction> {
     let startTime = Date.now();
     // Write blob to ffmpeg virtual filesystem
     await this.ffmpeg.writeFile('input.webm', await fetchFile(blob));
@@ -77,8 +82,10 @@ export default class Analyze {
     const files = await this.ffmpeg.listDir('/');
     const frameFiles = files.filter((f) => f.name.startsWith('frame_') && f.name.endsWith('.jpg'));
 
-    const predictions: Prediction[] = [];
+    const predictions: FramePrediction[] = [];
 
+    let videoWidth: number | null = null;
+    let videoHeight: number | null = null;
     // Process each frame
     log(`Extracted ${frameFiles.length} frames in ${Date.now() - startTime}ms`);
     startTime = Date.now();
@@ -87,6 +94,12 @@ export default class Analyze {
       const frameData = await this.ffmpeg.readFile(frameFile.name);
       const blob = new Blob([frameData], { type: 'image/jpeg' });
       const bitmap = await createImageBitmap(blob);
+      if (!videoWidth) {
+        videoWidth = bitmap.width;
+      }
+      if (!videoHeight) {
+        videoHeight = bitmap.height;
+      }
       
       const canvas = document.createElement('canvas');
       canvas.width = INPUT_SIZE;
@@ -109,7 +122,7 @@ export default class Analyze {
       const data = output[Object.keys(output)[0]].data;
       for (let i = 0; i < 300; i++) {
         const base = i * 6;
-        const prediction: Prediction = {
+        const prediction: FramePrediction = {
           frameNumber: f,
           x1: data[base] as number / INPUT_SIZE,
           y1: data[base + 1] as number / INPUT_SIZE,
@@ -126,14 +139,18 @@ export default class Analyze {
         log(`Processed ${f} / ${frameFiles.length} frames`);
       }
     }
+    const physics = new Physics(videoWidth!, videoHeight!);
     // Cleanup
     frameFiles.forEach((f) => this.ffmpeg.deleteFile(f.name));
     this.ffmpeg.deleteFile('input.webm');
     this.ffmpeg.deleteFile('trimmed.webm');
     log(`Processed ${frameFiles.length} frames in ${Date.now() - startTime}ms`);
+    physics.addPredictions(predictions);
+    const estimate = physics.estimate(FRAME_RATE);
     return {
       predictions,
-      worldSize: this.physics.worldSize()
+      worldSize: physics.worldSize(),
+      estimate
     };
   }
 

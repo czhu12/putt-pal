@@ -1,5 +1,4 @@
-import { CLASS_ID_GOLF_BALL, CLASS_ID_PUTTER, Prediction } from "./analyze";
-import { Circle } from "./opencv";
+import { CLASS_ID_GOLF_BALL, CLASS_ID_PUTTER, FramePrediction } from "./analyze";
 
 const GOLFBALL_RADIUS = 21.336; // in mm
 const MINIMUM_EVIDENCE_COUNT = 10;
@@ -30,28 +29,54 @@ function calculateRollDistance(v0: number, stimp: number) {
   return distanceMeters;
 }
 
+function isSquare(prediction: FramePrediction): boolean {
+  const width = Math.abs(prediction.x1 - prediction.x2);
+  const height = Math.abs(prediction.y1 - prediction.y2);
+  if (width === 0 || height === 0) {
+    return false;
+  }
+  // Check width and height are similar
+  const ratio = width / height;
+  return ratio > 0.9 && ratio < 1.1;
+}
+
+function estimateRadius(prediction: FramePrediction): number {
+  const width = Math.abs(prediction.x1 - prediction.x2);
+  const height = Math.abs(prediction.y1 - prediction.y2);
+  const radius = (width + height) / 2;
+  return radius;
+}
+
 export default class Physics {
-  private circles: Circle[];
-  public estimatedMillimetersPerPixel: number | null = 0.5; // TODO: Remove this
+  private predictions: FramePrediction[];
   private videoWidth: number | null = null;
   private videoHeight: number | null = null;
 
-  constructor() {
-    this.circles = [];
+  constructor(videoWidth: number, videoHeight: number) {
+    this.predictions = [];
+    this.videoWidth = videoWidth;
+    this.videoHeight = videoHeight;
   }
 
-  analyzePredictions(circles: Circle[]) {
-    this.circles.push(...circles);
-    if (this.circles.length > MAXIMUM_EVIDENCE_COUNT) {
-      this.circles = this.circles.slice(-MAXIMUM_EVIDENCE_COUNT);
-    }
+  addPredictions(predictions: FramePrediction[]) {
+    const normalizedPredictions = predictions.map(p => {
+      return {
+        ...p,
+        x1: p.x1 * this.videoWidth!,
+        y1: p.y1 * this.videoHeight!,
+        x2: p.x2 * this.videoWidth!,
+        y2: p.y2 * this.videoHeight!,
+      }
+    })
+    this.predictions = normalizedPredictions;
+  }
+
+  stationaryGolfballPredictions() {
+    return this.predictions.filter(p => p.classId === CLASS_ID_GOLF_BALL).filter((p) => isSquare(p));
   }
 
   inferMillimetersPerPixel() {
-    if (this.circles.length < MINIMUM_EVIDENCE_COUNT) return;
-
-    // Get the radiuses of the circles
-    const radiuses = this.circles.map(c => c.radius);
+    const radiuses = this.stationaryGolfballPredictions().map(p => estimateRadius(p));
     radiuses.sort((a, b) => a - b);
     // Discard the smallest and largest 10% of circles
     const startIndex = Math.floor(radiuses.length * 0.1);
@@ -59,21 +84,17 @@ export default class Physics {
     const trimmedRadiuses = radiuses.slice(startIndex, endIndex);
     const averageRadiusInPixels = trimmedRadiuses.reduce((sum, radius) => sum + radius, 0) / trimmedRadiuses.length;
 
-    this.estimatedMillimetersPerPixel = GOLFBALL_RADIUS / averageRadiusInPixels;
+    return GOLFBALL_RADIUS / averageRadiusInPixels;
   }
 
-  setVideoSize(videoWidth: number, videoHeight: number) {
-    this.videoWidth = videoWidth;
-    this.videoHeight = videoHeight;
-  }
-
-  measureDeltas(predictions: Prediction[], worldSize: WorldSize) {
+  measureDeltasInMillimeters(predictions: FramePrediction[]) {
+    const estimatedMillimetersPerPixel = this.inferMillimetersPerPixel();
     return predictions.slice(0, -1).map((p1, i) => {
       const p2 = predictions[i + 1];
-      const startX = p1.x1 * worldSize.xInMillimeters; // Use the top left corner of the bounding box
-      const startY = p1.y1 * worldSize.yInMillimeters;
-      const endX = p2.x1 * worldSize.xInMillimeters;
-      const endY = p2.y1 * worldSize.yInMillimeters;
+      const startX = p1.x1 * estimatedMillimetersPerPixel; // Use the top left corner of the bounding box
+      const startY = p1.y1 * estimatedMillimetersPerPixel;
+      const endX = p2.x1 * estimatedMillimetersPerPixel;
+      const endY = p2.y1 * estimatedMillimetersPerPixel;
       return {
         start: { x: startX, y: startY },
         end: { x: endX, y: endY },
@@ -82,8 +103,8 @@ export default class Physics {
     });
   }
 
-  estimateSpeed(predictions: Prediction[], worldSize: WorldSize, framesPerSecond: number) {
-    const deltas = this.measureDeltas(predictions, worldSize);
+  estimateSpeed(predictions: FramePrediction[], framesPerSecond: number) {
+    const deltas = this.measureDeltasInMillimeters(predictions);
     const hitIndex = deltas.findIndex(d => d.delta > 10);
     const hitDeltas = deltas.slice(hitIndex, hitIndex + 10);
     const mmPerFrame = Math.max(...hitDeltas.map(d => d.delta));
@@ -91,13 +112,12 @@ export default class Physics {
     return metersPerSecond;
   }
 
-  estimate(predictions: Prediction[], worldSize: WorldSize) {
-    const framesPerSecond = 30;
-    const putterPredictions = predictions.filter(p => p.classId === CLASS_ID_PUTTER);
-    const golfballPredictions = predictions.filter(p => p.classId === CLASS_ID_GOLF_BALL);
+  estimate(framesPerSecond: number) {
+    const putterPredictions = this.predictions.filter(p => p.classId === CLASS_ID_PUTTER);
+    const golfballPredictions = this.predictions.filter(p => p.classId === CLASS_ID_GOLF_BALL);
 
-    const metersPerSecond = this.estimateSpeed(golfballPredictions, worldSize, framesPerSecond);
-    const metersPerSecondPutter = this.estimateSpeed(putterPredictions, worldSize, framesPerSecond);
+    const metersPerSecond = this.estimateSpeed(golfballPredictions, framesPerSecond);
+    const metersPerSecondPutter = this.estimateSpeed(putterPredictions, framesPerSecond);
     return {
       distance: calculateRollDistance(metersPerSecond, STIMPS.average),
       speed: metersPerSecond,
@@ -107,9 +127,9 @@ export default class Physics {
   }
 
   worldSize(): WorldSize {
-    this.inferMillimetersPerPixel();
-    const width = this.estimatedMillimetersPerPixel! * this.videoWidth!;
-    const height = this.estimatedMillimetersPerPixel! * this.videoHeight!;
+    const estimatedMillimetersPerPixel = this.inferMillimetersPerPixel();
+    const width = estimatedMillimetersPerPixel * this.videoWidth!;
+    const height = estimatedMillimetersPerPixel * this.videoHeight!;
     return {
       xInMillimeters: width,
       yInMillimeters: height

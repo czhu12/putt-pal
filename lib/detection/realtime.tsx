@@ -1,22 +1,26 @@
-import Physics from "./physics";
-import { Circle, houghCircles } from "./opencv";
-
-const NUM_FRAMES_WITHOUT_BALL = 60;
-const NUM_FRAMES_WITH_BALL = 3;
-
-interface Ball extends Circle {
-  frameNumber: number;
-}
+const MOVEMENT_SMOOTHING_SIZE = 10;
+const WARMUP_PERIOD = 100;
 
 export default class Realtime {
-  private state: "ready" | "ball_found" | "ball_lost" = "ready";
-  private ballPositions: Ball[] = [];
   private _onBallHit: () => void = () => {};
-  private physics: Physics;
   private debug: boolean = false;
+  private previousFrame: any = null;
+  private movementThreshold: number;
+  private movements: number[] = [];
+  private frameCounter: number = 0;
+  private state: "ready" | "analyzing" = "ready";
 
-  constructor(physics: Physics) {
-    this.physics = physics;
+  constructor(movementThreshold: number) {
+    this.movementThreshold = movementThreshold;
+    this.movements = []
+    this.frameCounter = 0;
+  }
+
+  addMovement(movement: number) {
+    this.movements.push(movement);
+    if (this.movements.length > MOVEMENT_SMOOTHING_SIZE) {
+      this.movements.shift();
+    }
   }
 
   setDebug(debug: boolean) {
@@ -24,23 +28,29 @@ export default class Realtime {
   }
 
   ingestFrame(src: any, frameNumber: number) {
-    //const cv = window.cv;
-    //const parsedCircles = houghCircles(src);
+    if (this.state === "analyzing") {
+      // No point since we are already detecting and waiting for a ball to be hit
+      return;
+    }
+    this.frameCounter = frameNumber;
+    const cv = window.cv;
+    cv.cvtColor(src, src, cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(src, src, new cv.Size(5, 5), 0);
     
-    //if (parsedCircles.length === 1) {
-    //  this.physics.addCircles(parsedCircles);
-    //  this.ballPositions.push({
-    //    ...parsedCircles[0],
-    //    frameNumber // TODO: Maybe this is better use Date.now()?
-    //  });
-    //  this.stateTransition("ball_found");
-    //} else if (parsedCircles.length === 0) {
-    //  const mostRecentBall = this.ballPositions[this.ballPositions.length - 1];
-    //  if (mostRecentBall && (mostRecentBall.frameNumber + NUM_FRAMES_WITHOUT_BALL < frameNumber)) {
-    //    this.stateTransition("ball_lost");
-    //  }
-    //}
+    if (this.previousFrame) {
+      const diff = new cv.Mat();
 
+      cv.absdiff(src, this.previousFrame, diff);
+      let meanScalar = cv.mean(diff);
+      this.addMovement(meanScalar[0]);
+      cv.threshold(diff, diff, 25, 255, cv.THRESH_BINARY);
+
+      diff.delete();
+      this.previousFrame.delete();
+    }
+    this.previousFrame = src;
+    this.checkForMovement();
+   
     //if (this.debug) {
     //  // Draw circles on the image
     //  for (const circle of parsedCircles) {
@@ -49,17 +59,24 @@ export default class Realtime {
     //  
     //  cv.imshow('canvasOutput', src);
     //}
-    src.delete();
+  }
+
+  checkForMovement() {
+    if (this.frameCounter < WARMUP_PERIOD) {
+      return;
+    }
+    const averageMovement = this.movements.reduce((sum, value) => sum + value, 0) / this.movements.length;
+    if (averageMovement > this.movementThreshold) {
+      this.state = "analyzing";
+      this._onBallHit();
+    }
+  }
+
+  setState(state: "ready" | "analyzing") {
+    this.state = state;
   }
 
   set onBallHit(f: () => void) {
     this._onBallHit = f;
-  }
-
-  private stateTransition(newState: "ready" | "ball_found" | "ball_lost") {
-    if (newState === "ball_lost" && this.state === "ball_found") {
-      this._onBallHit();
-    }
-    this.state = newState;
   }
 }

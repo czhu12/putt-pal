@@ -22,26 +22,25 @@ export default function DebugDialog({ analyzeRecording, isReady }: { analyzeReco
               </code>
             </span>
             <span className="flex gap-2 my-4 block">
-              <button
-                className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold py-2 px-4 rounded"
-                onClick={async () => {
-                  const response = await fetch('/examples/putt-1.webm');
-                  const blob = await response.blob();
-                  analyzeRecording(blob);
-                }}
-                disabled={!isReady}>
-                Analyze #1
-              </button>
-              <button
-                className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold py-2 px-4 rounded"
-                onClick={async () => {
-                  const response = await fetch('/examples/putt-2.webm');
-                  const blob = await response.blob();
-                  analyzeRecording(blob);
-                }}
-                disabled={!isReady}>
-                Analyze #2
-              </button>
+              {[
+                '/examples/putt-1.webm',
+                '/examples/putt-10ft.webm',
+                '/examples/putt-15ft.webm',
+                '/examples/putt-20ft.webm',
+                '/examples/putt-25ft.webm',
+              ].map(url => (
+                <button
+                  key={url}
+                  className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold py-2 px-4 rounded"
+                  onClick={async () => {
+                    const response = await fetch(url);
+                    const blob = await response.blob();
+                    analyzeRecording(blob);
+                  }}
+                  disabled={!isReady}>
+                  Analyze {url.split('/').pop()?.split('.').shift()}
+                </button>
+              ))}
             </span>
           </DialogDescription>
         </DialogHeader>

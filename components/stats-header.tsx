@@ -6,9 +6,9 @@ export default function StatsHeader({ results }: { results: Results }) {
       <div className="border-r-1 border-gray-300">
         <p>
           <span className="text-4xl font-bold">
-            {results.loading ? "..." : results.distance.toFixed(2)}
+            {results.loading ? "..." : (results.distance * 3.28084).toFixed(2)}
           </span>
-          <span className="text-sm ml-2">meters</span>
+          <span className="text-sm ml-2">feet</span>
         </p>
         <div>Distance</div>
       </div>
