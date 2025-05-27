@@ -6,7 +6,7 @@ import Camera from "@/lib/detection/camera";
 import Realtime from "@/lib/detection/realtime";
 import Analyze from "@/lib/detection/analyze";
 import Physics from "@/lib/detection/physics";
-import loadOpenCv from "@/lib/detection/opencv";
+import { loadOpenCv } from "@/lib/detection/opencv";
 import DebugDialog from "./debug-dialog";
 import StatsHeader from "./stats-header";
 import { log } from "@/lib/detection/logging";
@@ -92,8 +92,10 @@ export default function Putting() {
       smashFactor: 1.0,
     });
     physics.setVideoSize(videoRef.current!.width, videoRef.current!.height);
-    const predictions = await analyze.current?.predict(recording);
-    const result = physics.estimate(predictions!);
+    const output = await analyze.current?.predict(recording);
+
+    debugger
+    const result = physics.estimate(output!.predictions, output!.worldSize);
     if (result) {
       setResults({
         loading: false,

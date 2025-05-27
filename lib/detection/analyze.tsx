@@ -2,10 +2,13 @@ import * as ort from 'onnxruntime-web';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { log } from './logging';
+import Physics, { WorldSize } from './physics';
+import { houghCircles } from './opencv';
 
 // Analyze the image to determine if the ball is in the frame
 const MODEL_PATH: string = "/models/best.onnx";
-const CLASS_ID_GOLF_BALL = 0;
+export const CLASS_ID_GOLF_BALL = 0;
+export const CLASS_ID_PUTTER = 1;
 const INFERENCE_BATCH_SIZE = 10;
 const INPUT_SIZE = 640;
 const FRAME_RATE = 30;
@@ -20,15 +23,22 @@ export interface Prediction {
   classId: number;
 }
 
+export interface Results {
+  predictions: Prediction[];
+  worldSize: WorldSize;
+}
+
 export default class Analyze {
   private session: ort.InferenceSession | null = null;
   private ffmpeg: FFmpeg;
+  private physics: Physics;
 
   constructor() {
     this.ffmpeg = new FFmpeg();
     this.ffmpeg.on("log", ({ message }) => {
       log(message);
     })
+    this.physics = new Physics();
   }
 
   async load() {
@@ -42,7 +52,8 @@ export default class Analyze {
     });
   }
 
-  async predict(blob: Blob): Promise<Prediction[]> {
+  async predict(blob: Blob): Promise<Results> {
+    let startTime = Date.now();
     // Write blob to ffmpeg virtual filesystem
     await this.ffmpeg.writeFile('input.webm', await fetchFile(blob));
 
@@ -69,7 +80,8 @@ export default class Analyze {
     const predictions: Prediction[] = [];
 
     // Process each frame
-    log(`Extracted ${frameFiles.length} frames`);
+    log(`Extracted ${frameFiles.length} frames in ${Date.now() - startTime}ms`);
+    startTime = Date.now();
     for (let f = 0; f < frameFiles.length; f++) {
       const frameFile = frameFiles[f];
       const frameData = await this.ffmpeg.readFile(frameFile.name);
@@ -80,10 +92,13 @@ export default class Analyze {
       canvas.width = INPUT_SIZE;
       canvas.height = INPUT_SIZE;
       const ctx = canvas.getContext('2d');
+      
       if (!ctx) continue;
 
       ctx.drawImage(bitmap, 0, 0, INPUT_SIZE, INPUT_SIZE);
+
       const imageData = ctx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE);
+
       const tensorData = this.preprocessImageDataToTensor(imageData);
 
       const feeds = {
@@ -105,7 +120,6 @@ export default class Analyze {
         };
         // Stop when confidence drops below threshold
         if (prediction.conf < 0.01) break;
-        if (prediction.classId !== CLASS_ID_GOLF_BALL) continue;
         predictions.push(prediction);
       }
       if (f % 10 === 0) {
@@ -116,7 +130,11 @@ export default class Analyze {
     frameFiles.forEach((f) => this.ffmpeg.deleteFile(f.name));
     this.ffmpeg.deleteFile('input.webm');
     this.ffmpeg.deleteFile('trimmed.webm');
-    return predictions;
+    log(`Processed ${frameFiles.length} frames in ${Date.now() - startTime}ms`);
+    return {
+      predictions,
+      worldSize: this.physics.worldSize()
+    };
   }
 
   private preprocessImageDataToTensor(imageData: ImageData): Float32Array {

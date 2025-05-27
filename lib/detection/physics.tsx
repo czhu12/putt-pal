@@ -1,4 +1,5 @@
-import { Prediction } from "./analyze";
+import { CLASS_ID_GOLF_BALL, CLASS_ID_PUTTER, Prediction } from "./analyze";
+import { Circle } from "./opencv";
 
 const GOLFBALL_RADIUS = 21.336; // in mm
 const MINIMUM_EVIDENCE_COUNT = 10;
@@ -11,31 +12,20 @@ const STIMPS = {
   pga: 13.0
 }
 
-interface WorldSize {
+export interface WorldSize {
   xInMillimeters: number;
   yInMillimeters: number;
 }
 
-export interface Circle {
-  x: number;
-  y: number;
-  radius: number;
-}
-
-interface FramePosition {
-  x: number;
-  y: number;
-  frame: number;
-}
-
 function calculateRollDistance(v0: number, stimp: number) {
-  const stimpmeterSpeed = 1.83; // m/s (Stimpmeter ball release speed)
+  const stimpmeterSpeed = 1.829; // m/s (Stimpmeter ball release speed)
   const feetToMeters = 0.3048;
+  const stimpInMeters = stimp * feetToMeters;
 
   // The Stimpmeter rating gives distance in feet at 1.83 m/s
   // We scale by the square of velocity (kinetic energy) under constant friction
-  const distanceFeet = stimp * (v0 ** 2) / (stimpmeterSpeed ** 2);
-  const distanceMeters = distanceFeet * feetToMeters;
+  const distanceFeet = (v0 ** 2) / (stimpmeterSpeed ** 2);
+  const distanceMeters = distanceFeet * stimpInMeters;
 
   return distanceMeters;
 }
@@ -50,12 +40,11 @@ export default class Physics {
     this.circles = [];
   }
 
-  addCircles(circles: Circle[]) {
+  analyzePredictions(circles: Circle[]) {
     this.circles.push(...circles);
     if (this.circles.length > MAXIMUM_EVIDENCE_COUNT) {
       this.circles = this.circles.slice(-MAXIMUM_EVIDENCE_COUNT);
     }
-    this.inferMillimetersPerPixel();
   }
 
   inferMillimetersPerPixel() {
@@ -78,36 +67,47 @@ export default class Physics {
     this.videoHeight = videoHeight;
   }
 
-  estimate(predictions: Prediction[]) {
-    const framesPerSecond = 30;
-    if (!!!this.estimatedMillimetersPerPixel) {
-      return;
-    }
-    const estimatedWorldSize = this.worldSize();
-    const deltas = predictions.slice(0, -1).map((p1, i) => {
+  measureDeltas(predictions: Prediction[], worldSize: WorldSize) {
+    return predictions.slice(0, -1).map((p1, i) => {
       const p2 = predictions[i + 1];
-      const startX = p1.x1 * estimatedWorldSize.xInMillimeters; // Use the top left corner of the bounding box
-      const startY = p1.y1 * estimatedWorldSize.yInMillimeters;
-      const endX = p2.x1 * estimatedWorldSize.xInMillimeters;
-      const endY = p2.y1 * estimatedWorldSize.yInMillimeters;
+      const startX = p1.x1 * worldSize.xInMillimeters; // Use the top left corner of the bounding box
+      const startY = p1.y1 * worldSize.yInMillimeters;
+      const endX = p2.x1 * worldSize.xInMillimeters;
+      const endY = p2.y1 * worldSize.yInMillimeters;
       return {
         start: { x: startX, y: startY },
         end: { x: endX, y: endY },
         delta: Math.sqrt((endX - startX) ** 2 + (endY - startY) ** 2)
       };
     });
+  }
+
+  estimateSpeed(predictions: Prediction[], worldSize: WorldSize, framesPerSecond: number) {
+    const deltas = this.measureDeltas(predictions, worldSize);
     const hitIndex = deltas.findIndex(d => d.delta > 10);
     const hitDeltas = deltas.slice(hitIndex, hitIndex + 10);
     const mmPerFrame = Math.max(...hitDeltas.map(d => d.delta));
     const metersPerSecond = mmPerFrame * framesPerSecond / 1000;
+    return metersPerSecond;
+  }
+
+  estimate(predictions: Prediction[], worldSize: WorldSize) {
+    const framesPerSecond = 30;
+    const putterPredictions = predictions.filter(p => p.classId === CLASS_ID_PUTTER);
+    const golfballPredictions = predictions.filter(p => p.classId === CLASS_ID_GOLF_BALL);
+
+    const metersPerSecond = this.estimateSpeed(golfballPredictions, worldSize, framesPerSecond);
+    const metersPerSecondPutter = this.estimateSpeed(putterPredictions, worldSize, framesPerSecond);
     return {
       distance: calculateRollDistance(metersPerSecond, STIMPS.average),
       speed: metersPerSecond,
-      smashFactor: 1.0
+      smashFactor: metersPerSecond / metersPerSecondPutter,
+      metersPerSecondPutter,
     };
   }
 
   worldSize(): WorldSize {
+    this.inferMillimetersPerPixel();
     const width = this.estimatedMillimetersPerPixel! * this.videoWidth!;
     const height = this.estimatedMillimetersPerPixel! * this.videoHeight!;
     return {
