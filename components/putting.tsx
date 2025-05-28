@@ -65,9 +65,9 @@ export default function Putting() {
       });
     camera.current.setDebug(debug);
 
-    console.log("setting on bal hit")
     realtime.current.onBallHit = () => {
       log("BALL HIT");
+      setAppState(AppState.Analyzing);
 
       //setTimeout(() => {
       //  const recording: Blob | undefined = camera.current?.returnRecording();
@@ -113,10 +113,7 @@ export default function Putting() {
       smashFactor: 1.0,
     });
     const output = await analyze.current?.predict(recording);
-    console.log(output);
 
-    // Wait 1 second then restart the timer
-    //const result = physics.estimate(output!.predictions, output!.worldSize);
     if (output) {
       setResults({
         distance: output.estimate.distance,

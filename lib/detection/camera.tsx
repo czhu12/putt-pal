@@ -51,12 +51,11 @@ export default class Camera {
       return;
     }
     const cv = window.cv;
-    log(`created src object ${this.video.width}x${this.video.height}`);
     let src = new cv.Mat(this.video.height, this.video.width, cv.CV_8UC4);
 
     this.cap.read(src);
 
-    this.onFrame(src, this.frameNumber);
+    await this.onFrame(src, this.frameNumber);
     this.frameNumber++;
 
     this.trackFps();
