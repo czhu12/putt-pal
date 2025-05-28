@@ -60,8 +60,8 @@ export default function Putting() {
     realtime.current = new Realtime(3);
     camera.current = new Camera(
       videoRef.current!,
-        (src: any, frameNumber: number) => {
-        realtime.current!.ingestFrame(src, frameNumber);
+        (prevFrame: any, frame: any, frameNumber: number) => {
+        realtime.current!.ingestFrame(prevFrame, frame, frameNumber);
       });
     camera.current.setDebug(debug);
 

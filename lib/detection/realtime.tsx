@@ -4,7 +4,6 @@ const WARMUP_PERIOD = 100;
 export default class Realtime {
   private _onBallHit: () => void = () => {};
   private debug: boolean = false;
-  private previousFrame: any = null;
   private movementThreshold: number;
   private movements: number[] = [];
   private frameCounter: number = 0;
@@ -27,9 +26,10 @@ export default class Realtime {
     this.debug = debug;
   }
 
-  ingestFrame(src: any, frameNumber: number) {
+  ingestFrame(prevFrame: any, src: any, frameNumber: number) {
     if (this.state === "analyzing") {
       // No point since we are already detecting and waiting for a ball to be hit
+      // Make sure to delete the previous frame to avoid memory leaks
       return;
     }
     this.frameCounter = frameNumber;
@@ -37,18 +37,18 @@ export default class Realtime {
     cv.cvtColor(src, src, cv.COLOR_RGBA2GRAY);
     cv.GaussianBlur(src, src, new cv.Size(5, 5), 0);
     
-    if (this.previousFrame) {
+    if (prevFrame) {
       const diff = new cv.Mat();
 
-      cv.absdiff(src, this.previousFrame, diff);
+      cv.absdiff(src, prevFrame, diff);
       let meanScalar = cv.mean(diff);
       this.addMovement(meanScalar[0]);
       cv.threshold(diff, diff, 25, 255, cv.THRESH_BINARY);
 
       diff.delete();
-      this.previousFrame.delete();
+      //this.previousFrame.delete();
+      //this.previousFrame = null;
     }
-    this.previousFrame = src;
     this.checkForMovement();
    
     //if (this.debug) {

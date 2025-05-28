@@ -7,7 +7,7 @@ export default class Camera {
   private video: HTMLVideoElement;
   private stream: MediaStream | null = null;
   private cap: any; //cv.VideoCapture;
-  private onFrame: (frame: any, frameNumber: number) => void;
+  private onFrame: (prevFrame: any, frame: any, frameNumber: number) => void;
   private frameNumber: number;
   public estimatedFps: number;
   private lastFrameTime: number;
@@ -16,7 +16,9 @@ export default class Camera {
   private mediaRecorder: MediaRecorder | null = null;
   private debug: boolean = false;
 
-  constructor(video: HTMLVideoElement, onFrame: (frame: any, frameNumber: number) => void) {
+  private previousFrame: any | null = null;
+
+  constructor(video: HTMLVideoElement, onFrame: (prevFrame: any, frame: any, frameNumber: number) => void) {
     this.frameNumber = 0;
     this.streaming = false;
     this.video = video;
@@ -24,6 +26,7 @@ export default class Camera {
     this.estimatedFps = 0;
     this.lastFrameTime = 0;
     this.recordingBuffer = [];
+    this.previousFrame = null;
   }
 
   setDebug(debug: boolean) {
@@ -51,16 +54,22 @@ export default class Camera {
       return;
     }
     const cv = window.cv;
-    let src = new cv.Mat(this.video.height, this.video.width, cv.CV_8UC4);
+    let currentFrame = new cv.Mat(this.video.height, this.video.width, cv.CV_8UC4);
 
-    this.cap.read(src);
+    this.cap.read(currentFrame);
 
-    await this.onFrame(src, this.frameNumber);
+    await this.onFrame(this.previousFrame, currentFrame, this.frameNumber);
+
     this.frameNumber++;
 
     this.trackFps();
 
     requestAnimationFrame(this.processFrame.bind(this)); // loop
+
+    if (this.previousFrame) {
+      this.previousFrame.delete();
+    }
+    this.previousFrame = currentFrame;
   }
 
   trackFps() {
@@ -70,6 +79,7 @@ export default class Camera {
   }
 
   async start() {
+    const cv = window.cv;
     const thiz = this;
     return new Promise((resolve, reject) => {
       navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
