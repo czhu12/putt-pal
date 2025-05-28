@@ -1,3 +1,5 @@
+import { log } from './logging';
+
 const CHUNK_DURATION_MS = 2500;
 
 export default class Camera {
@@ -49,7 +51,8 @@ export default class Camera {
       return;
     }
     const cv = window.cv;
-    let src = new cv.Mat(this.video.videoHeight, this.video.videoWidth, cv.CV_8UC4);
+    log(`created src object ${this.video.width}x${this.video.height}`);
+    let src = new cv.Mat(this.video.height, this.video.width, cv.CV_8UC4);
 
     this.cap.read(src);
 
@@ -73,20 +76,19 @@ export default class Camera {
       navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
         .then(function (stream: MediaStream) {
           thiz.stream = stream;
+          log(`Stream count: ${stream.getVideoTracks().length}`);
           const videoTrack = stream.getVideoTracks()[0];
           const settings = videoTrack.getSettings();
+          log(`Video track settings: ${JSON.stringify(settings)}`);
 
           thiz.video.srcObject = thiz.stream;
-          thiz.video.play();
-          console.log("Setting video width and height", settings.width, settings.height);
+          log(`Setting video width and height ${settings.width}x${settings.height}`);
           thiz.video.width = settings.width!;
           thiz.video.height = settings.height!;
 
+          thiz.video.play();
+
           thiz.video.onloadedmetadata = function () {
-            if (thiz.debug) {
-              document.getElementById('canvasOutput')!.setAttribute('width', thiz.video.videoWidth.toString());
-              document.getElementById('canvasOutput')!.setAttribute('height', thiz.video.videoHeight.toString());
-            }
             thiz.startVideoCapture();
             resolve(void 0);
           };

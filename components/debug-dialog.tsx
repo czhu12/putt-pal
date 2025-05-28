@@ -14,16 +14,16 @@ export default function DebugDialog({ analyzeRecording, isReady }: { analyzeReco
   return (
     <Dialog>
       <DialogTrigger>Open Debugger</DialogTrigger>
-      <DialogContent className="min-w-4xl">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>Debug</DialogTitle>
           <DialogDescription>
-            <span className="block overflow-auto w-full h-[400px] bg-gray-100 p-2 rounded-md block my-3 text-sm">
+            <span className="block overflow-scroll w-full h-[100px] bg-gray-100 p-2 rounded-md block my-3 text-sm max-w-xs">
               <code id="debug-log">
                 Logs will appear here<br/>
               </code>
             </span>
-            <span className="flex gap-2 my-4 block">
+            <span className="flex gap-2 my-4 flex-col items-center block">
               {[
                 '/examples/putt-1.webm',
                 '/examples/putt-10ft.webm',
@@ -47,7 +47,7 @@ export default function DebugDialog({ analyzeRecording, isReady }: { analyzeReco
             </span>
             {selectedUrl && (
               <span className="flex flex-col items-center justify-center">
-                <video src={selectedUrl} autoPlay muted loop className="w-[200px]" />
+                <video src={selectedUrl} autoPlay muted loop className="w-[50px]" />
                 <span className="text-sm text-gray-500">
                   {selectedUrl.split('/').pop()?.split('.').shift()}
                 </span>

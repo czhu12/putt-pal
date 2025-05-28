@@ -1,15 +1,15 @@
 import { CLASS_ID_GOLF_BALL, CLASS_ID_PUTTER, FramePrediction } from "./analyze";
 
 const GOLFBALL_RADIUS = 21.336; // in mm
-const MINIMUM_EVIDENCE_COUNT = 10;
-const MAXIMUM_EVIDENCE_COUNT = 10;
 
-const STIMPS = {
+export const STIMPS = {
   slow: 6.0,
   average: 8.0,
   fast: 10.0,
   pga: 13.0
 }
+
+export type StimpKey = keyof typeof STIMPS;
 
 export interface WorldSize {
   xInMillimeters: number;
@@ -112,14 +112,14 @@ export default class Physics {
     return metersPerSecond;
   }
 
-  estimate(framesPerSecond: number) {
+  estimate(framesPerSecond: number, stimpLevel: number) {
     const putterPredictions = this.predictions.filter(p => p.classId === CLASS_ID_PUTTER);
     const golfballPredictions = this.predictions.filter(p => p.classId === CLASS_ID_GOLF_BALL);
 
     const metersPerSecond = this.estimateSpeed(golfballPredictions, framesPerSecond);
     const metersPerSecondPutter = this.estimateSpeed(putterPredictions, framesPerSecond);
     return {
-      distance: calculateRollDistance(metersPerSecond, STIMPS.average),
+      distance: calculateRollDistance(metersPerSecond, stimpLevel),
       speed: metersPerSecond,
       smashFactor: metersPerSecond / metersPerSecondPutter,
       metersPerSecondPutter,

@@ -2,7 +2,8 @@ import * as ort from 'onnxruntime-web';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { log } from './logging';
-import Physics, { WorldSize } from './physics';
+import Physics, { STIMPS, WorldSize } from './physics';
+import { Configuration } from '@/components/configuration-options';
 
 // Analyze the image to determine if the ball is in the frame
 const MODEL_PATH: string = "/models/best.onnx";
@@ -38,12 +39,16 @@ export interface Prediction {
 export default class Analyze {
   private session: ort.InferenceSession | null = null;
   private ffmpeg: FFmpeg;
+  public configuration: Configuration;
 
   constructor() {
     this.ffmpeg = new FFmpeg();
     this.ffmpeg.on("log", ({ message }) => {
       log(message);
     })
+    this.configuration = {
+      stimpLevel: 'average',
+    }
   }
 
   async load() {
@@ -146,7 +151,8 @@ export default class Analyze {
     this.ffmpeg.deleteFile('trimmed.webm');
     log(`Processed ${frameFiles.length} frames in ${Date.now() - startTime}ms`);
     physics.addPredictions(predictions);
-    const estimate = physics.estimate(FRAME_RATE);
+    log(`Estimating with ${STIMPS[this.configuration.stimpLevel]} stimp level`);
+    const estimate = physics.estimate(FRAME_RATE, STIMPS[this.configuration.stimpLevel]);
     return {
       predictions,
       worldSize: physics.worldSize(),

@@ -9,18 +9,26 @@ import { loadOpenCv } from "@/lib/detection/opencv";
 import DebugDialog from "./debug-dialog";
 import StatsHeader from "./stats-header";
 import { log } from "@/lib/detection/logging";
+import ConfigurationOptions, { Configuration } from "./configuration-options";
+import { StimpKey } from "@/lib/detection/physics";
+import { delay } from "@/app/utils";
 
 export interface Results {
-  loading: boolean,
   distance: number,
   speed: number,
   smashFactor: number,
 }
 
+enum AppState {
+  Initializing,
+  Ready,
+  Analyzing,
+}
+
 export default function Putting() {
   const searchParams = useSearchParams();
   const debug = searchParams.get('debug') === 'true';
-  const [isReady, setIsReady] = useState(false);
+  const [appState, setAppState] = useState(AppState.Initializing);
 
   const initialized = useRef(false); // This is a next.js development hack
 
@@ -28,13 +36,25 @@ export default function Putting() {
   const realtime = useRef<Realtime | null>(null);
   const analyze = useRef<Analyze | null>(null);
   const camera = useRef<Camera | null>(null);
+  const [configuration, _setConfiguration] = useState<Configuration>({
+    stimpLevel: 'average' as StimpKey,
+  });
+
+  function setConfiguration(configuration: Configuration) {
+    _setConfiguration(configuration);
+    analyze.current!.configuration = configuration;
+  }
 
   const [results, setResults] = useState<Results>({
-    loading: false,
     distance: 0,
     speed: 0,
     smashFactor: 1.0,
   });
+
+  async function resumeReady() {
+    realtime.current?.setState("ready");
+    setAppState(AppState.Ready);
+  }
 
   async function startCamera() {
     realtime.current = new Realtime(3);
@@ -48,6 +68,7 @@ export default function Putting() {
     console.log("setting on bal hit")
     realtime.current.onBallHit = () => {
       log("BALL HIT");
+
       //setTimeout(() => {
       //  const recording: Blob | undefined = camera.current?.returnRecording();
       //  if (recording) {
@@ -58,7 +79,9 @@ export default function Putting() {
     }
     realtime.current.setDebug(debug);
 
-    camera.current.start();
+    await camera.current.start();
+    await delay(250);
+    resumeReady();
   }
 
   function stopCamera() {
@@ -72,7 +95,6 @@ export default function Putting() {
 
   async function initializeModels() {
     await Promise.all([loadAnalyzer(), loadOpenCv()]);
-    setIsReady(true);
     startCamera();
   }
 
@@ -84,8 +106,8 @@ export default function Putting() {
   }, []);
 
   async function analyzeRecording(recording: Blob) {
+    setAppState(AppState.Analyzing);
     setResults({
-      loading: true,
       distance: 0,
       speed: 0,
       smashFactor: 1.0,
@@ -93,43 +115,59 @@ export default function Putting() {
     const output = await analyze.current?.predict(recording);
     console.log(output);
 
-    setTimeout(() => {
-      // Wait 1 second then restart the timer
-      realtime.current?.setState("ready");
-    }, 1000);
+    // Wait 1 second then restart the timer
     //const result = physics.estimate(output!.predictions, output!.worldSize);
     if (output) {
       setResults({
-        loading: false,
         distance: output.estimate.distance,
         speed: output.estimate.speed,
         smashFactor: output.estimate.smashFactor,
       });
     }
+
+    await delay(1000);
+    resumeReady();
   }
 
   return (
     <div>
       <div className="static bg-transparent">
-        <p className="text-gray-600">{isReady ? "ready" : "loading..."}</p>
+        {appState === AppState.Ready && (
+          <div className="flex flex-col items-center text-green-600 font-bold bg-green-100 p-4">
+            <p className="text-gray-600">Ready</p>
+          </div>
+        )}
+
+        {appState === AppState.Initializing && (
+          <div className="flex flex-col items-center bg-gray-100 font-bold p-4">
+            <p className="text-gray-600">Loading...</p>
+          </div>
+        )}
+
+        {appState === AppState.Analyzing && (
+          <div className="flex flex-col items-center bg-gray-100 font-bold p-4">
+            <p className="text-gray-600">Analyzing...</p>
+          </div>
+        )}
+      </div>
+      <div className="flex flex-col items-center">
         <StatsHeader results={results} />
       </div>
-      <div className="relative w-full h-[300px] overflow-hidden">
+      <div className="relative w-full h-[400px] overflow-hidden">
         <video 
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 min-w-full min-h-full"
           ref={videoRef}
           id="videoInput"
         />
       </div>
-      {debug && (
-        <div>
-          <DebugDialog analyzeRecording={analyzeRecording} isReady={isReady} />
-          <canvas
-            className="top-0 left-0"
-            id="canvasOutput"
-          />
-        </div>
-      )}
+      <div className="py-4 flex flex-col items-center">
+        <ConfigurationOptions configuration={configuration} setConfiguration={setConfiguration} />
+        {debug && (
+          <div className="flex flex-col items-center mt-6">
+            <DebugDialog analyzeRecording={analyzeRecording} isReady={appState !== AppState.Initializing} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
