@@ -12,14 +12,9 @@ import { log } from "@/lib/detection/logging";
 import ConfigurationOptions, { Configuration } from "./configuration-options";
 import { StimpKey } from "@/lib/detection/physics";
 import { delay } from "@/app/utils";
+import { PhysicsEstimate } from "@/lib/detection/physics";
 
-export interface Results {
-  distance: number,
-  speed: number,
-  smashFactor: number,
-}
-
-enum AppState {
+export enum AppState {
   Initializing,
   Ready,
   Analyzing,
@@ -38,6 +33,7 @@ export default function Putting() {
   const camera = useRef<Camera | null>(null);
   const [configuration, _setConfiguration] = useState<Configuration>({
     stimpLevel: 'average' as StimpKey,
+    alignment: true,
   });
 
   function setConfiguration(configuration: Configuration) {
@@ -45,11 +41,7 @@ export default function Putting() {
     analyze.current!.configuration = configuration;
   }
 
-  const [results, setResults] = useState<Results>({
-    distance: 0,
-    speed: 0,
-    smashFactor: 1.0,
-  });
+  const [results, setResults] = useState<PhysicsEstimate | undefined>();
 
   async function resumeReady() {
     realtime.current?.setState("ready");
@@ -90,11 +82,14 @@ export default function Putting() {
 
   async function loadAnalyzer() {
     analyze.current = new Analyze();
+    console.log("Loading analyzer");
     await analyze.current.load();
+    console.log("Analyzer loaded");
   }
 
   async function initializeModels() {
     await Promise.all([loadAnalyzer(), loadOpenCv()]);
+    console.log("Models loaded");
     startCamera();
   }
 
@@ -107,19 +102,10 @@ export default function Putting() {
 
   async function analyzeRecording(recording: Blob) {
     setAppState(AppState.Analyzing);
-    setResults({
-      distance: 0,
-      speed: 0,
-      smashFactor: 1.0,
-    });
-    const output = await analyze.current?.predict(recording);
+    const r = await analyze.current?.predict(recording);
 
-    if (output) {
-      setResults({
-        distance: output.estimate.distance,
-        speed: output.estimate.speed,
-        smashFactor: output.estimate.smashFactor,
-      });
+    if (r) {
+      setResults(r);
     }
 
     await delay(1000);
@@ -148,7 +134,7 @@ export default function Putting() {
         )}
       </div>
       <div className="flex flex-col items-center">
-        <StatsHeader results={results} />
+        <StatsHeader results={results} appState={appState} />
       </div>
       <div className="relative w-full h-[400px] overflow-hidden">
         <video 
@@ -156,6 +142,7 @@ export default function Putting() {
           ref={videoRef}
           id="videoInput"
         />
+        <div className="absolute top-1/2 left-0 w-full h-[2px] bg-red-500 opacity-50" />
       </div>
       <div className="py-4 flex flex-col items-center">
         <ConfigurationOptions configuration={configuration} setConfiguration={setConfiguration} />

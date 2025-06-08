@@ -2,10 +2,11 @@ import * as ort from 'onnxruntime-web';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { log } from './logging';
-import Physics, { STIMPS, WorldSize } from './physics';
+import Physics, { STIMPS, PhysicsEstimate } from './physics';
 import { Configuration } from '@/components/configuration-options';
 
 // Analyze the image to determine if the ball is in the frame
+const CONFIDENCE_THRESHOLD = 0.10;
 const MODEL_PATH: string = "/models/best.onnx";
 export const CLASS_ID_GOLF_BALL = 0;
 export const CLASS_ID_PUTTER = 1;
@@ -15,6 +16,7 @@ const FRAME_RATE = 30;
 
 export interface FramePrediction {
   frameNumber: number;
+  time: number;
   x1: number;
   y1: number;
   x2: number;
@@ -23,18 +25,34 @@ export interface FramePrediction {
   classId: number;
 }
 
-export interface PhysicsEstimate {
-  distance: number;
-  speed: number;
-  smashFactor: number;
-  metersPerSecondPutter: number;
+function uniqueFrames(predictions: FramePrediction[]) {
+  const frameCounts = new Map<number, number>();
+  let unique = true;
+  predictions.forEach(p => {
+    if (frameCounts.has(p.frameNumber)) {
+      frameCounts.set(p.frameNumber, frameCounts.get(p.frameNumber)! + 1);
+      unique = false;
+    } else {
+      frameCounts.set(p.frameNumber, 1);
+    }
+  })
+  return {
+    unique,
+    frameCounts,
+  }
 }
 
-export interface Prediction {
-  predictions: FramePrediction[];
-  worldSize: WorldSize;
-  estimate: PhysicsEstimate;
+function consistency(predictions: FramePrediction[]) {
+  const putterPositions = predictions.filter(p => p.classId === CLASS_ID_PUTTER)
+  const golfBallPredictions = predictions.filter(p => p.classId === CLASS_ID_GOLF_BALL)
+  const golfBall = uniqueFrames(golfBallPredictions)
+  const putter = uniqueFrames(putterPositions)
+  return {
+    golfBall,
+    putter,
+  }
 }
+
 
 export default class Analyze {
   private session: ort.InferenceSession | null = null;
@@ -48,6 +66,7 @@ export default class Analyze {
     })
     this.configuration = {
       stimpLevel: 'average',
+      alignment: true,
     }
   }
 
@@ -62,7 +81,7 @@ export default class Analyze {
     });
   }
 
-  async predict(blob: Blob): Promise<Prediction> {
+  async predict(blob: Blob): Promise<PhysicsEstimate> {
     let startTime = Date.now();
     // Write blob to ffmpeg virtual filesystem
     await this.ffmpeg.writeFile('input.webm', await fetchFile(blob));
@@ -99,22 +118,29 @@ export default class Analyze {
       const frameData = await this.ffmpeg.readFile(frameFile.name);
       const blob = new Blob([frameData], { type: 'image/jpeg' });
       const bitmap = await createImageBitmap(blob);
-      if (!videoWidth) {
-        videoWidth = bitmap.width;
-      }
-      if (!videoHeight) {
-        videoHeight = bitmap.height;
-      }
-      
+      if (!videoWidth) videoWidth = bitmap.width;
+      if (!videoHeight) videoHeight = bitmap.height;
+      const scale = INPUT_SIZE / Math.max(bitmap.width, bitmap.height);
+      const newW = Math.round(bitmap.width * scale);
+      const newH = Math.round(bitmap.height * scale);
+      const padW = Math.floor((INPUT_SIZE - newW) / 2);
+      const padH = Math.floor((INPUT_SIZE - newH) / 2);
+
       const canvas = document.createElement('canvas');
       canvas.width = INPUT_SIZE;
       canvas.height = INPUT_SIZE;
       const ctx = canvas.getContext('2d');
-      
-      if (!ctx) continue;
 
-      ctx.drawImage(bitmap, 0, 0, INPUT_SIZE, INPUT_SIZE);
+      if (!ctx) throw new Error('Failed to get canvas context');
 
+      // Fill background with gray (letterbox padding)
+      ctx.fillStyle = 'rgb(114, 114, 114)';
+      ctx.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE);
+
+      // Draw resized image with padding
+      ctx.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height, padW, padH, newW, newH);
+
+      // Now you can read imageData
       const imageData = ctx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE);
 
       const tensorData = this.preprocessImageDataToTensor(imageData);
@@ -125,21 +151,45 @@ export default class Analyze {
 
       const output = await this.session!.run(feeds);
       const data = output[Object.keys(output)[0]].data;
+      // We know its good up to here
       for (let i = 0; i < 300; i++) {
         const base = i * 6;
+
+        const rawX1 = data[base] as number;
+        const rawY1 = data[base + 1] as number;
+        const rawX2 = data[base + 2] as number;
+        const rawY2 = data[base + 3] as number;
+        const conf = data[base + 4] as number;
+        const classId = data[base + 5] as number;
+
+        if (conf < CONFIDENCE_THRESHOLD) break;
+
+        // Undo letterbox padding and scaling
+        const x1_no_pad = (rawX1 - padW) / scale;
+        const y1_no_pad = (rawY1 - padH) / scale;
+        const x2_no_pad = (rawX2 - padW) / scale;
+        const y2_no_pad = (rawY2 - padH) / scale;
+
+        // Clamp to original image size
+        const x1_pixel = Math.max(0, Math.min(videoWidth - 1, x1_no_pad));
+        const y1_pixel = Math.max(0, Math.min(videoHeight - 1, y1_no_pad));
+        const x2_pixel = Math.max(0, Math.min(videoWidth - 1, x2_no_pad));
+        const y2_pixel = Math.max(0, Math.min(videoHeight - 1, y2_no_pad));
+
         const prediction: FramePrediction = {
           frameNumber: f,
-          x1: data[base] as number / INPUT_SIZE,
-          y1: data[base + 1] as number / INPUT_SIZE,
-          x2: data[base + 2] as number / INPUT_SIZE,
-          y2: data[base + 3] as number / INPUT_SIZE,
-          conf: data[base + 4] as number,
-          classId: data[base + 5] as number
+          time: f / FRAME_RATE,
+          x1: x1_pixel,
+          y1: y1_pixel,
+          x2: x2_pixel,
+          y2: y2_pixel,
+          conf: conf,
+          classId: classId
         };
-        // Stop when confidence drops below threshold
-        if (prediction.conf < 0.01) break;
+
         predictions.push(prediction);
       }
+
       if (f % 10 === 0) {
         log(`Processed ${f} / ${frameFiles.length} frames`);
       }
@@ -152,12 +202,9 @@ export default class Analyze {
     log(`Processed ${frameFiles.length} frames in ${Date.now() - startTime}ms`);
     physics.addPredictions(predictions);
     log(`Estimating with ${STIMPS[this.configuration.stimpLevel]} stimp level`);
-    const estimate = physics.estimate(FRAME_RATE, STIMPS[this.configuration.stimpLevel]);
-    return {
-      predictions,
-      worldSize: physics.worldSize(),
-      estimate
-    };
+    //const predictionsConsistent = consistency(predictions);
+
+    return physics.estimate(FRAME_RATE, STIMPS[this.configuration.stimpLevel]);
   }
 
   private preprocessImageDataToTensor(imageData: ImageData): Float32Array {

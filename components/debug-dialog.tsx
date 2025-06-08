@@ -26,10 +26,11 @@ export default function DebugDialog({ analyzeRecording, isReady }: { analyzeReco
             <span className="flex gap-2 my-4 flex-col items-center block">
               {[
                 '/examples/putt-1.webm',
+                '/examples/putt-7ft.webm',
                 '/examples/putt-10ft.webm',
-                '/examples/putt-15ft.webm',
                 '/examples/putt-20ft.webm',
-                '/examples/putt-25ft.webm',
+                '/examples/putt-50ft.webm',
+                '/examples/putt-70ft.webm',
               ].map(url => (
                 <button
                   key={url}
